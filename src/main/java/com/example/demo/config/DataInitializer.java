@@ -25,34 +25,14 @@ public class DataInitializer {
     @EventListener(ApplicationReadyEvent.class)
     public void loadData() {
         // Makes
-        Make toyota = new Make();
-        toyota.setName("Toyota");
-        makeRepository.save(toyota);
-
-        Make ford = new Make();
-        ford.setName("Ford");
-        makeRepository.save(ford);
+        Make toyota = getOrCreateMake("Toyota");
+        Make ford = getOrCreateMake("Ford");
 
         // Models
-        Model camry = new Model();
-        camry.setName("Camry");
-        camry.setMake(toyota);
-        modelRepository.save(camry);
-
-        Model corolla = new Model();
-        corolla.setName("Corolla");
-        corolla.setMake(toyota);
-        modelRepository.save(corolla);
-
-        Model tundra = new Model();
-        tundra.setName("Tundra");
-        tundra.setMake(toyota);
-        modelRepository.save(tundra);
-
-        Model mustang = new Model();
-        mustang.setName("Mustang");
-        mustang.setMake(ford);
-        modelRepository.save(mustang);
+        Model camry = getOrCreateModel("Camry", toyota);
+        getOrCreateModel("Corolla", toyota);
+        getOrCreateModel("Tundra", toyota);
+        getOrCreateModel("Mustang", ford);
 
         // Seed Vehicle
         Vehicle sample = new Vehicle();
@@ -62,5 +42,24 @@ public class DataInitializer {
         sample.setMake(toyota);
         sample.setModel(camry);
         vehicleRepository.save(sample);
+    }
+
+    private Make getOrCreateMake(String name) {
+        return makeRepository.findByNameIgnoreCase(name)
+                .orElseGet(() -> {
+                    Make make = new Make();
+                    make.setName(name);
+                    return makeRepository.save(make);
+                });
+    }
+
+    private Model getOrCreateModel(String name, Make make) {
+        return modelRepository.findByNameIgnoreCase(name)
+                .orElseGet(() -> {
+                    Model model = new Model();
+                    model.setName(name);
+                    model.setMake(make);
+                    return modelRepository.save(model);
+                });
     }
 }
