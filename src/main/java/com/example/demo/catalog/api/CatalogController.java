@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api")
+@RequestMapping("/catalog")
 @CrossOrigin(origins = "*")
 public class CatalogController {
 
@@ -22,12 +22,12 @@ public class CatalogController {
 
     @GetMapping("/makes")
     public List<Make> getMakes() {
-        return catalogQueryService.getAllMakes();
+        return catalogQueryService.getMakes();
     }
 
-    @GetMapping("/models-by-name/{makeName}")
-    public List<Model> getModelsByName(@PathVariable String makeName) {
-        return catalogQueryService.getModelsByName(makeName);
+    @GetMapping("/models/{makeId}")
+    public List<Model> getModelsByMake(@PathVariable Long makeId) {
+        return catalogQueryService.getModelsByMake(makeId);
     }
 
     @GetMapping("/models")
@@ -35,9 +35,10 @@ public class CatalogController {
         return catalogQueryService.getModels();
     }
 
-    @GetMapping("/models/{makeId}")
-    public List<Model> getModelsByMake(@PathVariable Long makeId) {
-        return catalogQueryService.getModelsByMake(makeId);
+    @GetMapping("/model-by-name/{modelName}")
+    public List<Model> getModelByName(@PathVariable String modelName) {
+        return catalogQueryService.getModelByName(modelName);
     }
+
 }
 

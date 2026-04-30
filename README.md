@@ -29,6 +29,20 @@ Build only the app image:
 docker compose build app
 ```
 
+Rebuild and replace only the `app` service:
+
+```bash
+docker compose up -d --build --force-recreate --no-deps app
+```
+
+What it does:
+
+- `-d` runs the container in detached mode (in the background)
+- `--build` rebuilds the `app` image before starting the container
+- `--force-recreate` removes and recreates the `app` container even if Docker thinks the config has not changed
+- `--no-deps` starts only the `app` service and does not restart dependent services like `db`
+- `app` targets just the application service defined in `docker-compose.yml`
+
 Run locally:
 
 ```bash

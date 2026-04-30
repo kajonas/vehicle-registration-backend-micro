@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api")
+@RequestMapping("/vehicle")
 @CrossOrigin(origins = "*")
 public class VehicleRegistrationController {
 
@@ -22,7 +22,7 @@ public class VehicleRegistrationController {
         return vehicleRegistrationService.getAllVehicles();
     }
 
-    @PostMapping("/vehicles")
+    @PostMapping("/save")
     public ResponseEntity<Vehicle> saveVehicle(@RequestBody Vehicle vehicle) {
         return ResponseEntity.ok(vehicleRegistrationService.saveVehicle(vehicle));
     }

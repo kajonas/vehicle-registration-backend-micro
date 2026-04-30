@@ -18,20 +18,20 @@ public class CatalogQueryService {
     @Autowired
     private ModelRepository modelRepository;
 
-    public List<Make> getAllMakes() {
+    public List<Make> getMakes() {
         return makeRepository.findAll();
-    }
-
-    public List<Model> getModels() {
-        return modelRepository.findAll();
     }
 
     public List<Model> getModelsByMake(Long makeId) {
         return modelRepository.findByMakeId(makeId);
     }
 
-    public List<Model> getModelsByName(String makeName) {
-        return modelRepository.findByName(makeName);
+    public List<Model> getModels() {
+        return modelRepository.findAll();
+    }
+
+    public List<Model> getModelByName(String modelName) {
+        return modelRepository.findByName(modelName);
     }
 }
 
