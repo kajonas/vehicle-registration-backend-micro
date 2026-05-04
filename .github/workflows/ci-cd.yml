@@ -108,6 +108,5 @@ jobs:
       - name: Deploy on EC2
         run: |
           ssh -i ~/.ssh/ec2_key ec2-user@${{ secrets.EC2_HOST }} \
-            "IMAGE_TAG=${{ needs.image.outputs.image_tag }} \
-             DB_PASSWORD=${{ secrets.DB_PASSWORD }} \
-             bash ~/run_on_ec2.sh"
+            "DB_PASSWORD=${{ secrets.DB_PASSWORD }} \
+             bash ~/run_on_ec2.sh '${{ needs.image.outputs.image_tag }}'"

@@ -9,6 +9,8 @@ set -euo pipefail
 #   ECR_REPOSITORY (default: demo/vehicle-registration-backend-micro)
 #   APP_PORT (default: 8080)
 #   APP_HEALTH_PATH (default: /catalog/makes)
+#   APP_HEALTH_RETRIES (default: 120)
+#   APP_HEALTH_INTERVAL_SECONDS (default: 2)
 #   DB_NAME (default: vehicle_db)
 #   DB_USER (default: vehicle_user)
 #   DB_PASSWORD (default: vehicle_pass)
@@ -16,9 +18,11 @@ set -euo pipefail
 
 AWS_REGION="${AWS_REGION:-us-east-2}"
 ECR_REPOSITORY="${ECR_REPOSITORY:-demo/vehicle-registration-backend-micro}"
-IMAGE_TAG="${1:-latest}"
+IMAGE_TAG="${1:-${IMAGE_TAG:-latest}}"
 APP_PORT="${APP_PORT:-8080}"
 APP_HEALTH_PATH="${APP_HEALTH_PATH:-/catalog/makes}"
+APP_HEALTH_RETRIES="${APP_HEALTH_RETRIES:-120}"
+APP_HEALTH_INTERVAL_SECONDS="${APP_HEALTH_INTERVAL_SECONDS:-2}"
 DB_NAME="${DB_NAME:-vehicle_db}"
 DB_USER="${DB_USER:-vehicle_user}"
 DB_PASSWORD="${DB_PASSWORD:-vehicle_pass}"
@@ -104,17 +108,23 @@ APP_LOCAL_URL="http://localhost:${APP_PORT}${APP_HEALTH_PATH}"
 if command -v curl >/dev/null 2>&1; then
   echo "Waiting for app readiness at $APP_LOCAL_URL"
   APP_HEALTHY=0
-  for _ in $(seq 1 60); do
+  for _ in $(seq 1 "$APP_HEALTH_RETRIES"); do
     if curl -fsS "$APP_LOCAL_URL" >/dev/null 2>&1; then
       echo "App is responding."
       APP_HEALTHY=1
       break
     fi
-    sleep 2
+    sleep "$APP_HEALTH_INTERVAL_SECONDS"
   done
 
   if [[ "$APP_HEALTHY" -ne 1 ]]; then
     echo "Error: app did not become healthy at $APP_LOCAL_URL within timeout." >&2
+    echo "Compose status:" >&2
+    "${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" ps || true
+    echo "Recent app logs:" >&2
+    "${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" logs --tail=200 app || true
+    echo "Recent db logs:" >&2
+    "${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" logs --tail=200 db || true
     exit 1
   fi
 else
