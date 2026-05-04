@@ -91,131 +91,23 @@ jobs:
     runs-on: ubuntu-latest
     needs: image
     steps:
-      - name: Deploy app on EC2 over SSH
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ec2-user
-          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-          script_stop: true
-          command_timeout: 30m
-          script: |
-            set -eu
+      - name: Checkout
+        uses: actions/checkout@v4
 
-            AWS_REGION="${{ env.AWS_REGION }}"
-            APP_PORT="${{ env.APP_PORT }}"
-            APP_HEALTH_PATH="${{ env.APP_HEALTH_PATH }}"
-            IMAGE_URI="${{ needs.image.outputs.image_uri }}"
-            DB_NAME="vehicle_db"
-            DB_USER="vehicle_user"
-            DB_PASSWORD="${{ secrets.DB_PASSWORD }}"
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/ec2_key
+          chmod 600 ~/.ssh/ec2_key
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
 
-            if [ -z "$DB_PASSWORD" ]; then
-              DB_PASSWORD="vehicle_pass"
-            fi
+      - name: Copy deploy script to EC2
+        run: |
+          scp -i ~/.ssh/ec2_key run_on_ec2.sh ec2-user@${{ secrets.EC2_HOST }}:~/run_on_ec2.sh
 
-            if ! command -v aws >/dev/null 2>&1; then
-              echo "Error: aws CLI not found on EC2." >&2
-              exit 1
-            fi
-
-            if ! command -v docker >/dev/null 2>&1; then
-              echo "Error: docker not found on EC2." >&2
-              exit 1
-            fi
-
-            USE_SUDO=0
-            if docker info >/dev/null 2>&1; then
-              USE_SUDO=0
-            elif sudo docker info >/dev/null 2>&1; then
-              USE_SUDO=1
-            else
-              echo "Error: Docker daemon not reachable for current user or via sudo." >&2
-              exit 1
-            fi
-
-            dkr() {
-              if [ "$USE_SUDO" -eq 1 ]; then
-                sudo docker "$@"
-              else
-                docker "$@"
-              fi
-            }
-
-            ECR_REGISTRY="$(echo "$IMAGE_URI" | cut -d/ -f1)"
-
-            echo "Logging into ECR: $ECR_REGISTRY"
-            aws ecr get-login-password --region "$AWS_REGION" | dkr login --username AWS --password-stdin "$ECR_REGISTRY"
-
-            echo "Pulling image: $IMAGE_URI"
-            dkr pull "$IMAGE_URI"
-
-            echo "Creating network/volume"
-            dkr network create vehicle-net >/dev/null 2>&1 || true
-            dkr volume create postgres-data >/dev/null
-
-            echo "Replacing DB container"
-            dkr rm -f vehicle-db >/dev/null 2>&1 || true
-            dkr run -d \
-              --name vehicle-db \
-              --network vehicle-net \
-              --env "POSTGRES_DB=$DB_NAME" \
-              --env "POSTGRES_USER=$DB_USER" \
-              --env "POSTGRES_PASSWORD=$DB_PASSWORD" \
-              --volume postgres-data:/var/lib/postgresql/data \
-              postgres:16-alpine
-
-            echo "Waiting for PostgreSQL readiness"
-            i=0
-            until [ "$i" -ge 60 ]; do
-              if dkr exec vehicle-db pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
-                break
-              fi
-              i=$((i + 1))
-              sleep 2
-            done
-
-            if [ "$i" -ge 60 ]; then
-              echo "Error: vehicle-db did not become ready in time." >&2
-              dkr logs --tail=100 vehicle-db || true
-              exit 1
-            fi
-
-            echo "Freeing app port if already allocated"
-            PORT_CONTAINERS="$(dkr ps -q --filter "publish=${APP_PORT}")"
-            if [ -n "$PORT_CONTAINERS" ]; then
-              dkr rm -f $PORT_CONTAINERS >/dev/null 2>&1 || true
-            fi
-
-            echo "Replacing app container"
-            dkr rm -f vehicle-app >/dev/null 2>&1 || true
-            dkr run -d \
-              --name vehicle-app \
-              --network vehicle-net \
-              --publish "${APP_PORT}:8080" \
-              --env "SPRING_DATASOURCE_URL=jdbc:postgresql://vehicle-db:5432/$DB_NAME" \
-              --env "SPRING_DATASOURCE_USERNAME=$DB_USER" \
-              --env "SPRING_DATASOURCE_PASSWORD=$DB_PASSWORD" \
-              "$IMAGE_URI"
-
-            if ! command -v curl >/dev/null 2>&1; then
-              echo "Error: curl is required for readiness checks." >&2
-              exit 1
-            fi
-
-            APP_LOCAL_URL="http://localhost:${APP_PORT}${APP_HEALTH_PATH}"
-            echo "Waiting for app readiness at $APP_LOCAL_URL"
-            i=0
-            until [ "$i" -ge 60 ]; do
-              if curl -fsS "$APP_LOCAL_URL" >/dev/null 2>&1; then
-                echo "App is responding. Deployment succeeded."
-                exit 0
-              fi
-              i=$((i + 1))
-              sleep 2
-            done
-
-            echo "Error: app did not become healthy at $APP_LOCAL_URL within timeout." >&2
-            dkr ps --filter name=vehicle-db --filter name=vehicle-app || true
-            dkr logs --tail=100 vehicle-app || true
-            exit 1
+      - name: Deploy on EC2
+        run: |
+          ssh -i ~/.ssh/ec2_key ec2-user@${{ secrets.EC2_HOST }} \
+            "IMAGE_TAG=${{ needs.image.outputs.image_tag }} \
+             DB_PASSWORD=${{ secrets.DB_PASSWORD }} \
+             bash ~/run_on_ec2.sh"
