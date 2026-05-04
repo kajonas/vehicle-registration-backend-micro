@@ -109,8 +109,6 @@ jobs:
             DB_NAME="vehicle_db"
             DB_USER="vehicle_user"
             DB_PASSWORD="${{ secrets.DB_PASSWORD }}"
-            DEPLOY_DIR="$HOME/vehicle-registration-backend-micro"
-            COMPOSE_FILE="$DEPLOY_DIR/docker-compose.ec2.yml"
 
             if [ -z "$DB_PASSWORD" ]; then
               DB_PASSWORD="vehicle_pass"
@@ -135,63 +133,38 @@ jobs:
               exit 1
             fi
 
-            if sh -c "$DOCKER_CMD compose version" >/dev/null 2>&1; then
-              COMPOSE_CMD="$DOCKER_CMD compose"
-            elif command -v docker-compose >/dev/null 2>&1; then
-              COMPOSE_CMD="docker-compose"
-            else
-              echo "Error: docker compose not installed." >&2
-              exit 1
-            fi
-
             ECR_REGISTRY="$(echo "$IMAGE_URI" | cut -d/ -f1)"
-
-            mkdir -p "$DEPLOY_DIR"
-
-            # Export variables used by compose interpolation to avoid writing secrets directly into YAML.
-            export DB_NAME DB_USER DB_PASSWORD IMAGE_URI APP_PORT
-
-            cat > "$COMPOSE_FILE" <<'EOF'
-            services:
-              db:
-                image: "postgres:16-alpine"
-                environment:
-                  POSTGRES_DB: "${DB_NAME}"
-                  POSTGRES_USER: "${DB_USER}"
-                  POSTGRES_PASSWORD: "${DB_PASSWORD}"
-                volumes:
-                  - postgres-data:/var/lib/postgresql/data
-                healthcheck:
-                  test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
-                  interval: 10s
-                  timeout: 5s
-                  retries: 10
-
-              app:
-                image: "${IMAGE_URI}"
-                depends_on:
-                  db:
-                    condition: service_healthy
-                ports:
-                  - "${APP_PORT}:8080"
-                environment:
-                  SPRING_DATASOURCE_URL: "jdbc:postgresql://db:5432/${DB_NAME}"
-                  SPRING_DATASOURCE_USERNAME: "${DB_USER}"
-                  SPRING_DATASOURCE_PASSWORD: "${DB_PASSWORD}"
-
-            volumes:
-              postgres-data:
-            EOF
-
-            echo "Generated compose file (with placeholders):"
-            cat "$COMPOSE_FILE"
-
-            # Validate compose syntax before up.
-            sh -c "$COMPOSE_CMD -f \"$COMPOSE_FILE\" config >/dev/null"
 
             aws ecr get-login-password --region "$AWS_REGION" | sh -c "$DOCKER_CMD login --username AWS --password-stdin $ECR_REGISTRY"
             sh -c "$DOCKER_CMD pull $IMAGE_URI"
-            sh -c "$COMPOSE_CMD -f \"$COMPOSE_FILE\" up -d --remove-orphans"
+
+            # Idempotent network/volume setup.
+            sh -c "$DOCKER_CMD network create vehicle-net >/dev/null 2>&1 || true"
+            sh -c "$DOCKER_CMD volume create postgres-data >/dev/null"
+
+            # Replace DB container.
+            sh -c "$DOCKER_CMD rm -f vehicle-db >/dev/null 2>&1 || true"
+            sh -c "$DOCKER_CMD run -d --name vehicle-db --network vehicle-net -e POSTGRES_DB=$DB_NAME -e POSTGRES_USER=$DB_USER -e POSTGRES_PASSWORD=$DB_PASSWORD -v postgres-data:/var/lib/postgresql/data postgres:16-alpine"
+
+            # Wait for PostgreSQL readiness.
+            i=0
+            until [ "$i" -ge 60 ]; do
+              if sh -c "$DOCKER_CMD exec vehicle-db pg_isready -U $DB_USER -d $DB_NAME" >/dev/null 2>&1; then
+                break
+              fi
+              i=$((i + 1))
+              sleep 2
+            done
+
+            if [ "$i" -ge 60 ]; then
+              echo "Error: vehicle-db did not become ready in time." >&2
+              sh -c "$DOCKER_CMD logs --tail=100 vehicle-db" || true
+              exit 1
+            fi
+
+            # Replace app container.
+            sh -c "$DOCKER_CMD rm -f vehicle-app >/dev/null 2>&1 || true"
+            sh -c "$DOCKER_CMD run -d --name vehicle-app --network vehicle-net -p $APP_PORT:8080 -e SPRING_DATASOURCE_URL=jdbc:postgresql://vehicle-db:5432/$DB_NAME -e SPRING_DATASOURCE_USERNAME=$DB_USER -e SPRING_DATASOURCE_PASSWORD=$DB_PASSWORD $IMAGE_URI"
 
             if ! command -v curl >/dev/null 2>&1; then
               echo "Error: curl is required for readiness checks." >&2
@@ -211,7 +184,6 @@ jobs:
             done
 
             echo "Error: app did not become healthy at $APP_LOCAL_URL within timeout." >&2
-            sh -c "$COMPOSE_CMD -f \"$COMPOSE_FILE\" ps" || true
-            sh -c "$COMPOSE_CMD -f \"$COMPOSE_FILE\" logs --tail=100 app" || true
+            sh -c "$DOCKER_CMD ps --filter name=vehicle-db --filter name=vehicle-app"
+            sh -c "$DOCKER_CMD logs --tail=100 vehicle-app" || true
             exit 1
-
