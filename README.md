@@ -105,3 +105,4 @@ PostgreSQL host access for external tools (IntelliJ DB, pgAdmin):
 - Port: `5433`
 - Database: `vehicle_db`
 - Username: `vehicle_user`
+- Password: `vehicle_pass`
