@@ -148,7 +148,10 @@ jobs:
 
             mkdir -p "$DEPLOY_DIR"
 
-            cat > "$COMPOSE_FILE" <<EOF
+            # Export variables used by compose interpolation to avoid writing secrets directly into YAML.
+            export DB_NAME DB_USER DB_PASSWORD IMAGE_URI APP_PORT
+
+            cat > "$COMPOSE_FILE" <<'EOF'
             services:
               db:
                 image: "postgres:16-alpine"
@@ -180,15 +183,15 @@ jobs:
               postgres-data:
             EOF
 
-            echo "Generated compose file:"
+            echo "Generated compose file (with placeholders):"
             cat "$COMPOSE_FILE"
 
-            # Validate compose syntax before up; prints a useful error location when malformed.
-            sh -c "$COMPOSE_CMD -f $COMPOSE_FILE config >/dev/null"
+            # Validate compose syntax before up.
+            sh -c "$COMPOSE_CMD -f \"$COMPOSE_FILE\" config >/dev/null"
 
             aws ecr get-login-password --region "$AWS_REGION" | sh -c "$DOCKER_CMD login --username AWS --password-stdin $ECR_REGISTRY"
             sh -c "$DOCKER_CMD pull $IMAGE_URI"
-            sh -c "$COMPOSE_CMD -f $COMPOSE_FILE up -d --remove-orphans"
+            sh -c "$COMPOSE_CMD -f \"$COMPOSE_FILE\" up -d --remove-orphans"
 
             if ! command -v curl >/dev/null 2>&1; then
               echo "Error: curl is required for readiness checks." >&2
@@ -208,7 +211,7 @@ jobs:
             done
 
             echo "Error: app did not become healthy at $APP_LOCAL_URL within timeout." >&2
-            sh -c "$COMPOSE_CMD -f $COMPOSE_FILE ps" || true
-            sh -c "$COMPOSE_CMD -f $COMPOSE_FILE logs --tail=100 app" || true
+            sh -c "$COMPOSE_CMD -f \"$COMPOSE_FILE\" ps" || true
+            sh -c "$COMPOSE_CMD -f \"$COMPOSE_FILE\" logs --tail=100 app" || true
             exit 1
 
