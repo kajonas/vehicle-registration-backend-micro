@@ -124,32 +124,51 @@ jobs:
               exit 1
             fi
 
+            USE_SUDO=0
             if docker info >/dev/null 2>&1; then
-              DOCKER_CMD="docker"
+              USE_SUDO=0
             elif sudo docker info >/dev/null 2>&1; then
-              DOCKER_CMD="sudo docker"
+              USE_SUDO=1
             else
               echo "Error: Docker daemon not reachable for current user or via sudo." >&2
               exit 1
             fi
 
+            dkr() {
+              if [ "$USE_SUDO" -eq 1 ]; then
+                sudo docker "$@"
+              else
+                docker "$@"
+              fi
+            }
+
             ECR_REGISTRY="$(echo "$IMAGE_URI" | cut -d/ -f1)"
 
-            aws ecr get-login-password --region "$AWS_REGION" | sh -c "$DOCKER_CMD login --username AWS --password-stdin $ECR_REGISTRY"
-            sh -c "$DOCKER_CMD pull $IMAGE_URI"
+            echo "Logging into ECR: $ECR_REGISTRY"
+            aws ecr get-login-password --region "$AWS_REGION" | dkr login --username AWS --password-stdin "$ECR_REGISTRY"
 
-            # Idempotent network/volume setup.
-            sh -c "$DOCKER_CMD network create vehicle-net >/dev/null 2>&1 || true"
-            sh -c "$DOCKER_CMD volume create postgres-data >/dev/null"
+            echo "Pulling image: $IMAGE_URI"
+            dkr pull "$IMAGE_URI"
 
-            # Replace DB container.
-            sh -c "$DOCKER_CMD rm -f vehicle-db >/dev/null 2>&1 || true"
-            sh -c "$DOCKER_CMD run -d --name vehicle-db --network vehicle-net -e POSTGRES_DB=$DB_NAME -e POSTGRES_USER=$DB_USER -e POSTGRES_PASSWORD=$DB_PASSWORD -v postgres-data:/var/lib/postgresql/data postgres:16-alpine"
+            echo "Creating network/volume"
+            dkr network create vehicle-net >/dev/null 2>&1 || true
+            dkr volume create postgres-data >/dev/null
 
-            # Wait for PostgreSQL readiness.
+            echo "Replacing DB container"
+            dkr rm -f vehicle-db >/dev/null 2>&1 || true
+            dkr run -d \
+              --name vehicle-db \
+              --network vehicle-net \
+              --env "POSTGRES_DB=$DB_NAME" \
+              --env "POSTGRES_USER=$DB_USER" \
+              --env "POSTGRES_PASSWORD=$DB_PASSWORD" \
+              --volume postgres-data:/var/lib/postgresql/data \
+              postgres:16-alpine
+
+            echo "Waiting for PostgreSQL readiness"
             i=0
             until [ "$i" -ge 60 ]; do
-              if sh -c "$DOCKER_CMD exec vehicle-db pg_isready -U $DB_USER -d $DB_NAME" >/dev/null 2>&1; then
+              if dkr exec vehicle-db pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
                 break
               fi
               i=$((i + 1))
@@ -158,13 +177,26 @@ jobs:
 
             if [ "$i" -ge 60 ]; then
               echo "Error: vehicle-db did not become ready in time." >&2
-              sh -c "$DOCKER_CMD logs --tail=100 vehicle-db" || true
+              dkr logs --tail=100 vehicle-db || true
               exit 1
             fi
 
-            # Replace app container.
-            sh -c "$DOCKER_CMD rm -f vehicle-app >/dev/null 2>&1 || true"
-            sh -c "$DOCKER_CMD run -d --name vehicle-app --network vehicle-net -p $APP_PORT:8080 -e SPRING_DATASOURCE_URL=jdbc:postgresql://vehicle-db:5432/$DB_NAME -e SPRING_DATASOURCE_USERNAME=$DB_USER -e SPRING_DATASOURCE_PASSWORD=$DB_PASSWORD $IMAGE_URI"
+            echo "Freeing app port if already allocated"
+            PORT_CONTAINERS="$(dkr ps -q --filter "publish=${APP_PORT}")"
+            if [ -n "$PORT_CONTAINERS" ]; then
+              dkr rm -f $PORT_CONTAINERS >/dev/null 2>&1 || true
+            fi
+
+            echo "Replacing app container"
+            dkr rm -f vehicle-app >/dev/null 2>&1 || true
+            dkr run -d \
+              --name vehicle-app \
+              --network vehicle-net \
+              --publish "${APP_PORT}:8080" \
+              --env "SPRING_DATASOURCE_URL=jdbc:postgresql://vehicle-db:5432/$DB_NAME" \
+              --env "SPRING_DATASOURCE_USERNAME=$DB_USER" \
+              --env "SPRING_DATASOURCE_PASSWORD=$DB_PASSWORD" \
+              "$IMAGE_URI"
 
             if ! command -v curl >/dev/null 2>&1; then
               echo "Error: curl is required for readiness checks." >&2
@@ -184,6 +216,6 @@ jobs:
             done
 
             echo "Error: app did not become healthy at $APP_LOCAL_URL within timeout." >&2
-            sh -c "$DOCKER_CMD ps --filter name=vehicle-db --filter name=vehicle-app"
-            sh -c "$DOCKER_CMD logs --tail=100 vehicle-app" || true
+            dkr ps --filter name=vehicle-db --filter name=vehicle-app || true
+            dkr logs --tail=100 vehicle-app || true
             exit 1
