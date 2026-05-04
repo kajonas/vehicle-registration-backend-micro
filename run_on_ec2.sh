@@ -11,6 +11,7 @@ set -euo pipefail
 #   APP_HEALTH_PATH (default: /catalog/makes)
 #   APP_HEALTH_RETRIES (default: 120)
 #   APP_HEALTH_INTERVAL_SECONDS (default: 2)
+#   SPRING_JPA_HIBERNATE_DDL_AUTO (default: update)
 #   DB_NAME (default: vehicle_db)
 #   DB_USER (default: vehicle_user)
 #   DB_PASSWORD (default: vehicle_pass)
@@ -23,6 +24,7 @@ APP_PORT="${APP_PORT:-8080}"
 APP_HEALTH_PATH="${APP_HEALTH_PATH:-/catalog/makes}"
 APP_HEALTH_RETRIES="${APP_HEALTH_RETRIES:-120}"
 APP_HEALTH_INTERVAL_SECONDS="${APP_HEALTH_INTERVAL_SECONDS:-2}"
+SPRING_JPA_HIBERNATE_DDL_AUTO="${SPRING_JPA_HIBERNATE_DDL_AUTO:-update}"
 DB_NAME="${DB_NAME:-vehicle_db}"
 DB_USER="${DB_USER:-vehicle_user}"
 DB_PASSWORD="${DB_PASSWORD:-vehicle_pass}"
@@ -90,6 +92,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${DB_NAME}
       SPRING_DATASOURCE_USERNAME: ${DB_USER}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: ${SPRING_JPA_HIBERNATE_DDL_AUTO}
 
 volumes:
   postgres-data:
